@@ -10,6 +10,8 @@ from mlhousing.preprocess import (
     feature_engineering_testdataset,
 )
 
+from sklearn.compose import ColumnTransformer
+
 
 def test_housing_df(params):
     """unit testing of raw data load.
@@ -106,7 +108,7 @@ def test_feature_engineering_traindataset(get_startified_split):
     """
 
     df1, df2 = get_startified_split
-    X_train, y_train, imputer = feature_engineering_traindataset(df1)
+    X_train, y_train, col_trans, final_columns = feature_engineering_traindataset(df1)
     assert "rooms_per_household" in X_train.columns
     assert "bedrooms_per_room" in X_train.columns
     assert "population_per_household" in X_train.columns
@@ -123,7 +125,8 @@ def test_feature_engineering_traindataset(get_startified_split):
 
     assert isinstance(X_train, pd.DataFrame)
     assert isinstance(y_train, pd.Series)
-    assert isinstance(imputer, SimpleImputer)
+    assert isinstance(col_trans, ColumnTransformer)
+    assert isinstance(final_columns, list)
 
 
 def test_feature_engineering_testdataset(
@@ -141,9 +144,9 @@ def test_feature_engineering_testdataset(
     """
 
     df1, df2 = get_startified_split
-    df11, df21, imputer = get_feature_engineering_traindataset
+    df11, df21, col_trans, final_columns = get_feature_engineering_traindataset
 
-    X_test, y_test = feature_engineering_testdataset(df2, imputer)
+    X_test, y_test = feature_engineering_testdataset(df2, col_trans, final_columns)
 
     assert "rooms_per_household" in X_test.columns
     assert "bedrooms_per_room" in X_test.columns

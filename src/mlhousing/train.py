@@ -140,8 +140,8 @@ def rf_rs_regression(X_train, y_train, artifacts_path):
     rnd_search = RandomizedSearchCV(
         forest_reg,
         param_distributions=param_distribs,
-        n_iter=10,
-        cv=5,
+        n_iter=5,
+        cv=2,
         scoring="neg_mean_squared_error",
         random_state=42,
     )
@@ -196,7 +196,7 @@ def rf_grid_regression(X_train, y_train, artifacts_path):
     grid_search = GridSearchCV(
         forest_reg,
         param_grid,
-        cv=5,
+        cv=2,
         scoring="neg_mean_squared_error",
         return_train_score=True,
     )

@@ -1,4 +1,5 @@
 import argparse
+
 from mlhousing.preprocess import init_preprocess
 from mlhousing.ingest_data import fetch_housing_data
 from mlhousing.train import init_training
@@ -6,7 +7,8 @@ from mlhousing.score import init_score
 
 
 def parse_args():
-    """Parse argument function which take command line argument for required folders and files which will be input as argument in different funtions
+    """Parse argument function which take command line argument for required folders and files which will be input as
+    argument in different funtions
 
     Args:
         Command line arguments

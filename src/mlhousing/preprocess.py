@@ -10,6 +10,43 @@ from sklearn.model_selection import (
 # from src.mlhousing.base_logger import logging
 
 import logging
+from sklearn.base import BaseEstimator, TransformerMixin
+from sklearn.compose import ColumnTransformer
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import OneHotEncoder
+
+
+class CombinedAttributesAdder(BaseEstimator, TransformerMixin):
+    def __init__(
+        self,
+        rooms_ix,
+        bedrooms_ix,
+        population_ix,
+        households_ix,
+        add_bedrooms_per_room=True,
+    ):  # no *args or **kargs
+        self.add_bedrooms_per_room = add_bedrooms_per_room
+        self.rooms_ix = rooms_ix
+        self.bedrooms_ix = bedrooms_ix
+        self.population_ix = population_ix
+        self.households_ix = households_ix
+
+    def fit(self, X, y=None):
+        return self  # nothing else to do
+
+    def transform(self, X):
+        rooms_per_household = X[:, self.rooms_ix] / X[:, self.households_ix]
+        population_per_household = X[:, self.population_ix] / X[:, self.households_ix]
+        if self.add_bedrooms_per_room:
+            bedrooms_per_room = X[:, self.bedrooms_ix] / X[:, self.rooms_ix]
+            return np.c_[
+                X, rooms_per_household, population_per_household, bedrooms_per_room
+            ]
+
+        else:
+            return np.c_[X, rooms_per_household, population_per_household]
+
 
 logging = logging
 
@@ -131,6 +168,65 @@ def drop_income_cat(strat_train_set, strat_test_set):
     return strat_train_set, strat_test_set
 
 
+def transform_pipeline(data_to_transform):
+
+    """numeric data preprocessing pipeline, categorical data preprocessing pipeline and three new feature engineered customtransformer
+
+    Args:
+        data_to_transform (dataframe, mandatory)
+
+
+    Return : col_trans (ColumnTransformer object), num_attribs (numeric columns name list), cat_attribs (categorical column name list)
+
+    """
+
+    col_names = "total_rooms", "total_bedrooms", "population", "households"
+    rooms_ix, bedrooms_ix, population_ix, households_ix = [
+        data_to_transform.columns.get_loc(c) for c in col_names
+    ]  # get the column indices
+
+    num_attribs = data_to_transform.select_dtypes(exclude=["object"]).columns.tolist()
+    cat_attribs = data_to_transform.select_dtypes(include=["object"]).columns.tolist()
+
+    print("Numeric Attribute", num_attribs)
+    print("Categorical Attribute", cat_attribs)
+
+    num_pipeline = Pipeline(
+        steps=[
+            ("imputer", SimpleImputer(strategy="median")),
+            (
+                "attribs_adder",
+                CombinedAttributesAdder(
+                    rooms_ix,
+                    bedrooms_ix,
+                    population_ix,
+                    households_ix,
+                    add_bedrooms_per_room=True,
+                ),
+            ),
+            ("std_scaler", StandardScaler()),
+        ]
+    )
+
+    cat_pipeline = Pipeline(
+        steps=[
+            ("impute", SimpleImputer(strategy="most_frequent")),
+            ("one-hot", OneHotEncoder(handle_unknown="ignore", sparse_output=False)),
+        ]
+    )
+
+    col_trans = ColumnTransformer(
+        transformers=[
+            ("num_pipeline", num_pipeline, num_attribs),
+            ("cat_pipeline", cat_pipeline, cat_attribs),
+        ],
+        remainder="drop",
+        n_jobs=-1,
+    )
+
+    return col_trans, num_attribs, cat_attribs
+
+
 def feature_engineering_traindataset(housing):
     """perform feature engineering on strat_train_set and generate three features from it and make X_train and y_train
 
@@ -138,75 +234,69 @@ def feature_engineering_traindataset(housing):
         housing (dataframe, mandatory)
 
 
-    Return : X_train (dataframe), y_train (dataframe), imputer(imputer fit object).
+    Return : X_train (dataframe), y_train (dataframe), col_trans(column transformer), final_columns(string).
 
     """
-
     y_train = housing["median_house_value"].copy()
 
     housing = housing.drop("median_house_value", axis=1)  # drop labels for training set
 
-    housing_num = housing.drop("ocean_proximity", axis=1)
+    col_trans, num_attribs, cat_attribs = transform_pipeline(housing)
 
-    imputer = SimpleImputer(strategy="median")
-    imputer.fit(housing_num)
-    X = imputer.transform(housing_num)
+    X_train = col_trans.fit_transform(housing)
 
-    housing_tr = pd.DataFrame(X, columns=housing_num.columns, index=housing.index)
-    housing_tr["rooms_per_household"] = (
-        housing_tr["total_rooms"] / housing_tr["households"]
-    )
-    housing_tr["bedrooms_per_room"] = (
-        housing_tr["total_bedrooms"] / housing_tr["total_rooms"]
-    )
-    housing_tr["population_per_household"] = (
-        housing_tr["population"] / housing_tr["households"]
+    new_numeric_cols = (
+        col_trans.named_transformers_["num_pipeline"]
+        .named_steps["std_scaler"]
+        .get_feature_names_out(
+            num_attribs
+            + ["rooms_per_household", "population_per_household", "bedrooms_per_room"]
+        )
     )
 
-    housing_cat = housing[["ocean_proximity"]]
-    X_train = housing_tr.join(pd.get_dummies(housing_cat, drop_first=True, dtype=int))
+    new_categorical_cols = (
+        col_trans.named_transformers_["cat_pipeline"]
+        .named_steps["one-hot"]
+        .get_feature_names_out(cat_attribs)
+    )
 
-    return X_train, y_train, imputer
+    final_columns = new_numeric_cols.tolist() + new_categorical_cols.tolist()
+
+    # print("Final_columns :", final_columns)
+
+    X_train = pd.DataFrame(X_train, columns=final_columns)
+
+    print("after X_train type:", type(X_train))
+    print("after X_train shape:", X_train.shape)
+
+    return X_train, y_train, col_trans, final_columns
 
 
-def feature_engineering_testdataset(housing_test, imputer):
+def feature_engineering_testdataset(housing_test, col_trans, final_columns):
     """perform feature engineering on strat_test_set and generate three features from it and make X_test and y_test
 
     Args:
         housing_test (dataframe, mandatory)
-        imputer (imputer fit object)
+        col_trans(column transformer)
+        final_columns(string)
 
 
     Return : X_test (dataframe), y_test (dataframe).
 
     """
-
     y_test = housing_test["median_house_value"].copy()
 
-    X_test = housing_test.drop("median_house_value", axis=1)
+    housing_test = housing_test.drop("median_house_value", axis=1)
 
-    X_test_num = X_test.drop("ocean_proximity", axis=1)
+    X_test = col_trans.transform(housing_test)
 
-    X_test_prepared = imputer.transform(X_test_num)
+    # print("X_test type:", type(X_test))
+    # print("X_test shape:", X_test.shape)
 
-    X_test_prepared = pd.DataFrame(
-        X_test_prepared, columns=X_test_num.columns, index=X_test.index
-    )
-    X_test_prepared["rooms_per_household"] = (
-        X_test_prepared["total_rooms"] / X_test_prepared["households"]
-    )
-    X_test_prepared["bedrooms_per_room"] = (
-        X_test_prepared["total_bedrooms"] / X_test_prepared["total_rooms"]
-    )
-    X_test_prepared["population_per_household"] = (
-        X_test_prepared["population"] / X_test_prepared["households"]
-    )
+    X_test = pd.DataFrame(X_test, columns=final_columns)
 
-    X_test_cat = X_test[["ocean_proximity"]]
-
-    X_test = X_test_prepared.join(
-        pd.get_dummies(X_test_cat, drop_first=True, dtype=int)
-    )
+    print("after X_test type:", type(X_test))
+    print("after X_test shape:", X_test.shape)
 
     return X_test, y_test
 
@@ -287,6 +377,10 @@ def init_preprocess(INPUT_PATH, INPUT_FILE, OUTPUT_PATH):
     strat_train_set, strat_test_set = drop_income_cat(strat_train_set, strat_test_set)
     housing = strat_train_set.copy()
     housing_test = strat_test_set.copy()
-    X_train, y_train, imputer = feature_engineering_traindataset(housing)
-    X_test, y_test = feature_engineering_testdataset(housing_test, imputer)
+    X_train, y_train, col_trans, final_columns = feature_engineering_traindataset(
+        housing
+    )
+    X_test, y_test = feature_engineering_testdataset(
+        housing_test, col_trans, final_columns
+    )
     save_processdata(X_train, y_train, X_test, y_test, INPUT_FILE, OUTPUT_PATH)

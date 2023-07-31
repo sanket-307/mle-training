@@ -10,3 +10,4 @@ venvps/
 docs/_build/
 *.egg-info
 *.csv
+*.coverage
